@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#07070c" />
+  <title>Hero AR Camera</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <main id="app">
+    <canvas id="stage"></canvas>
+    <video id="video" playsinline muted autoplay></video>
+
+    <!-- Top bar -->
+    <header class="top">
+      <div class="brand"><span class="dot"></span>HERO AR</div>
+      <div class="chips">
+        <button class="chip on" data-track="hands" title="Hand tracking">✋ Hands</button>
+        <button class="chip on" data-track="face" title="Face tracking">🙂 Face</button>
+        <button class="chip on" data-track="eyes" title="Eye / iris tracking">👁 Eyes</button>
+        <button class="chip" id="meshBtn" title="Tracking points dikhayein">◎ Mesh</button>
+      </div>
+      <div class="right">
+        <span id="fps" class="badge">-- fps</span>
+        <span id="res" class="badge">--</span>
+        <button id="settingsBtn" class="icon" title="Settings">⚙️</button>
+      </div>
+    </header>
+
+    <!-- Settings panel -->
+    <section id="settings" class="panel hidden">
+      <label>Quality
+        <select id="quality">
+          <option value="720">HD 720p</option>
+          <option value="1080" selected>Full HD 1080p</option>
+          <option value="1440">2K 1440p</option>
+          <option value="2160">4K 2160p</option>
+        </select>
+      </label>
+      <label>FPS
+        <select id="fpsSel">
+          <option value="30">30 fps</option>
+          <option value="60" selected>60 fps</option>
+        </select>
+      </label>
+      <label>Effect intensity <input id="intensity" type="range" min="0.3" max="2" step="0.1" value="1" /></label>
+      <label class="row"><input id="combo" type="checkbox" /> Combo mode (ek saath kai characters)</label>
+      <label class="row"><input id="mic" type="checkbox" checked /> Recording me mic audio</label>
+      <p class="small">Quality camera ki maximum capability tak hi jayegi. Recording canvas ke full resolution pe hoti hai.</p>
+    </section>
+
+    <div id="hint" class="hint"></div>
+    <div id="recTimer" class="rec-timer hidden"><span class="rdot"></span><span id="recTime">00:00</span></div>
+
+    <!-- Bottom -->
+    <footer class="bottom">
+      <div id="carousel" class="carousel"></div>
+      <div class="controls">
+        <button id="flipBtn" class="ctrl" title="Camera flip">🔄</button>
+        <button id="recBtn" class="rec" title="Record"><span></span></button>
+        <button id="shotBtn" class="ctrl" title="Photo">📸</button>
+      </div>
+    </footer>
+
+    <!-- Start overlay -->
+    <section id="start" class="overlay">
+      <div class="start-card">
+        <h1>Hero AR Camera</h1>
+        <p>Hand · Face · Eye tracking ke saath real-time superhero effects. HD recording.</p>
+        <button id="startBtn" class="primary">▶ Camera Start Karo</button>
+        <p id="status" class="status"></p>
+        <p class="small">Camera ki permission maangi jayegi. Sab processing aapke device pe hoti hai — video kahin upload nahi hota.</p>
+      </div>
+    </section>
+
+    <!-- Result modal -->
+    <section id="result" class="overlay hidden">
+      <div class="result-card">
+        <video id="resultVideo" controls playsinline></video>
+        <img id="resultImg" alt="snapshot" />
+        <div class="result-actions">
+          <a id="downloadBtn" class="primary" download>⬇ Download</a>
+          <button id="shareBtn" class="secondary">↗ Share</button>
+          <button id="closeResult" class="secondary">✕ Close</button>
+        </div>
+        <p id="resultInfo" class="small"></p>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
