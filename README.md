@@ -18,6 +18,20 @@ python3 -m http.server 8000
 **Phone pe chalane ke liye:** repo ko **GitHub Pages** pe deploy karo
 (Settings → Pages → Branch select karo). Phir `https://<username>.github.io/<repo>/` phone pe kholo.
 
+## Android APK
+
+`HeroAR.apk` phone pe install karo (Settings mein "Unknown apps / is source se install" allow karna padega).
+- Internet ki zarurat nahi hai, AI models APK ke andar hi hain
+- Recording aur photo apne aap **Gallery → Movies/HeroAR** aur **Pictures/HeroAR** mein save hote hain
+- Android 8.0+ chahiye, aur updated "Android System WebView" / Chrome hona chahiye
+
+Khud build karne ke liye (Android SDK + JDK 17+ chahiye):
+```bash
+cd android
+./prepare-assets.sh          # web app + MediaPipe models ko assets mein copy karta hai
+./gradlew assembleRelease    # APK: app/build/outputs/apk/release/app-release.apk
+```
+
 ## Characters aur gestures
 
 | # | Effect | Style | Kaise trigger karein |
@@ -54,6 +68,7 @@ python3 -m http.server 8000
 - Saari processing device pe hoti hai, video kahin upload nahi hota
 
 ```
+android/          # Android app (WebView wrapper, camera permission, Gallery save)
 index.html
 css/style.css
 js/main.js        # camera, render loop, UI, recording

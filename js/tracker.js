@@ -1,15 +1,26 @@
 // MediaPipe Tasks Vision: hand landmarks (21 pts x 2 hands) + face mesh (478 pts incl. iris) + blendshapes.
-import {
-  FilesetResolver,
-  FaceLandmarker,
-  HandLandmarker,
-} from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+// Library + models are loaded from ./vendor (bundled inside the Android APK, works offline).
+// If they are not present (e.g. plain GitHub Pages deploy) we fall back to the public CDNs.
+const VERSION = '0.10.14';
+const LOCAL = new URL('../vendor/', import.meta.url).href;
+const CDN = {
+  lib: `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VERSION}/vision_bundle.mjs`,
+  wasm: `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VERSION}/wasm`,
+  face: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+  hand: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+};
 
-const WASM = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
-const FACE_MODEL =
-  'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-const HAND_MODEL =
-  'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+async function loadVision() {
+  try {
+    const probe = await fetch(LOCAL + 'ok.txt');
+    if (!probe.ok) throw new Error('no local vendor');
+    const lib = await import(LOCAL + 'tasks-vision/vision_bundle.mjs');
+    return { lib, wasm: LOCAL + 'tasks-vision/wasm', face: LOCAL + 'models/face_landmarker.task', hand: LOCAL + 'models/hand_landmarker.task' };
+  } catch (e) {
+    const lib = await import(CDN.lib);
+    return { lib, ...CDN };
+  }
+}
 
 async function make(Cls, fileset, opts) {
   try {
@@ -28,10 +39,12 @@ async function make(Cls, fileset, opts) {
 
 export async function createTracker(onStatus = () => {}) {
   onStatus('AI engine load ho raha hai…');
-  const fileset = await FilesetResolver.forVisionTasks(WASM);
+  const src = await loadVision();
+  const { FilesetResolver, FaceLandmarker, HandLandmarker } = src.lib;
+  const fileset = await FilesetResolver.forVisionTasks(src.wasm);
   onStatus('Face + Eye tracking model load ho raha hai…');
   const face = await make(FaceLandmarker, fileset, {
-    baseOptions: { modelAssetPath: FACE_MODEL },
+    baseOptions: { modelAssetPath: src.face },
     runningMode: 'VIDEO',
     numFaces: 1,
     outputFaceBlendshapes: true,
@@ -40,7 +53,7 @@ export async function createTracker(onStatus = () => {}) {
   });
   onStatus('Hand tracking model load ho raha hai…');
   const hands = await make(HandLandmarker, fileset, {
-    baseOptions: { modelAssetPath: HAND_MODEL },
+    baseOptions: { modelAssetPath: src.hand },
     runningMode: 'VIDEO',
     numHands: 2,
     minHandDetectionConfidence: 0.5,

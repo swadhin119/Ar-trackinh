@@ -279,6 +279,27 @@ function showResult(r) {
   $('#downloadBtn').download = r.name;
   $('#resultInfo').textContent = r.info;
   $('#result').classList.remove('hidden');
+  if (window.AndroidBridge) saveToGallery(r);
+}
+
+// Android APK: WebView can't download blob: URLs, so stream the file to native code in chunks.
+function saveToGallery(r) {
+  if (!r.saving) r.saving = writeToGallery(r);
+  return r.saving;
+}
+async function writeToGallery(r) {
+  const B = window.AndroidBridge;
+  const type = (r.blob.type || 'video/webm').split(';')[0];
+  if (!B.begin(r.name, type)) return false;
+  const CH = 3 * 1024 * 1024; // multiple of 3 -> clean base64 chunks
+  for (let off = 0; off < r.blob.size; off += CH) {
+    const buf = new Uint8Array(await r.blob.slice(off, off + CH).arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    if (!B.append(btoa(bin))) return false;
+  }
+  r.saved = B.finish();
+  return r.saved;
 }
 
 // ---------------------------------------------------------------- Wiring
@@ -308,12 +329,28 @@ function wire() {
   $('#closeResult').onclick = () => { $('#result').classList.add('hidden'); $('#resultVideo').pause(); };
   $('#shareBtn').onclick = async () => {
     if (!lastResult) return;
+    if (window.AndroidBridge) {
+      await saveToGallery(lastResult);
+      window.AndroidBridge.share();
+      return;
+    }
     const file = new File([lastResult.blob], lastResult.name, { type: lastResult.blob.type });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try { await navigator.share({ files: [file], title: 'Hero AR' }); } catch (e) { /* cancelled */ }
     } else {
       alert('Is browser me direct share support nahi hai — Download use karo.');
     }
+  };
+  if (window.AndroidBridge) {
+    $('#downloadBtn').textContent = '⬇ Gallery me Save';
+    $('#downloadBtn').onclick = (e) => { e.preventDefault(); if (lastResult) saveToGallery(lastResult); };
+  }
+  // Android back button: close panels first, then exit.
+  window.heroBack = () => {
+    if (!$('#result').classList.contains('hidden')) { $('#closeResult').click(); return true; }
+    if (!$('#settings').classList.contains('hidden')) { $('#settings').classList.add('hidden'); return true; }
+    if (state.recorder) { stopRecording(); return true; }
+    return false;
   };
   window.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;

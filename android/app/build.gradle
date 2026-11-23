@@ -1,0 +1,32 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.heroar.camera'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'com.heroar.camera'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    androidResources {
+        // keep .task / .wasm model files uncompressed-friendly and never strip them
+        noCompress += ['task', 'wasm']
+        ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+}
