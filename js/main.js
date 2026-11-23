@@ -1,6 +1,6 @@
 import { createTracker } from './tracker.js';
 import { Scene, HAND_CONN } from './scene.js';
-import { Particles } from './fx.js';
+import { Particles, setLightLayer } from './fx.js';
 import { CHARACTERS } from './characters.js';
 
 const $ = (s) => document.querySelector(s);
@@ -8,13 +8,23 @@ const canvas = $('#stage');
 const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
 const video = $('#video');
 
-const QUALITY = { 720: [1280, 720], 1080: [1920, 1080], 1440: [2560, 1440], 2160: [3840, 2160] };
+// Short side of the video. Long side follows the chosen aspect (4:3 = full sensor, no crop/zoom).
+const QUALITY = { 720: 720, 1080: 1080, 1440: 1440, 2160: 2160 };
+
+// Light layer: every glow/beam/spark is drawn here, then bloomed + added on top of the video.
+const light = document.createElement('canvas');
+const lightCtx2 = light.getContext('2d');
+const bloomA = document.createElement('canvas');
+const bloomB = document.createElement('canvas');
+const bloomActx = bloomA.getContext('2d');
+const bloomBctx = bloomB.getContext('2d');
 
 const state = {
   facing: 'user',
   show: { hands: true, face: true, eyes: true },
   mesh: false,
   combo: false,
+  bloom: true,
   k: 1,
   active: new Map(), // id -> instance
   lastPicked: null,
@@ -82,27 +92,44 @@ function refreshCarousel() {
 // ---------------------------------------------------------------- Camera
 async function startCamera() {
   if (state.stream) state.stream.getTracks().forEach((t) => t.stop());
-  const [w, h] = QUALITY[$('#quality').value];
+  const short = QUALITY[$('#quality').value];
+  const ratio = $('#aspect').value === '43' ? 4 / 3 : 16 / 9;
+  const long = Math.round(short * ratio);
   const fps = +$('#fpsSel').value;
-  const portrait = window.innerHeight > window.innerWidth && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-  const constraints = {
-    audio: false,
-    video: {
-      facingMode: state.facing,
-      width: { ideal: portrait ? h : w },
-      height: { ideal: portrait ? w : h },
-      frameRate: { ideal: fps, max: fps },
-    },
+  const portrait = window.innerHeight > window.innerWidth;
+  const video0 = {
+    facingMode: state.facing,
+    width: { ideal: portrait ? short : long },
+    height: { ideal: portrait ? long : short },
+    aspectRatio: { ideal: portrait ? 1 / ratio : ratio },
+    frameRate: { ideal: fps, max: fps },
   };
   try {
-    state.stream = await navigator.mediaDevices.getUserMedia(constraints);
+    state.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: video0 });
   } catch (e) {
     console.warn('Preferred constraints failed, retrying basic', e);
     state.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: state.facing }, audio: false });
   }
   video.srcObject = state.stream;
   await video.play();
+  setupZoom();
   resize();
+}
+
+// Hardware camera zoom (Android Chrome/WebView). Start at the widest setting = no zoom.
+function setupZoom() {
+  const track = state.stream && state.stream.getVideoTracks()[0];
+  const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+  const row = $('#zoomRow'), sl = $('#zoom');
+  if (!caps.zoom || caps.zoom.max <= caps.zoom.min) { row.classList.add('hidden'); return; }
+  row.classList.remove('hidden');
+  sl.min = caps.zoom.min; sl.max = caps.zoom.max; sl.step = caps.zoom.step || 0.1; sl.value = caps.zoom.min;
+  track.applyConstraints({ advanced: [{ zoom: caps.zoom.min }] }).catch(() => {});
+  sl.oninput = () => track.applyConstraints({ advanced: [{ zoom: +sl.value }] }).catch(() => {});
+}
+
+function applyFit() {
+  canvas.style.objectFit = $('#fit').value;
 }
 
 function resize() {
@@ -111,13 +138,18 @@ function resize() {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
   }
+  if (light.width !== canvas.width || light.height !== canvas.height) {
+    light.width = canvas.width; light.height = canvas.height;
+    bloomA.width = Math.max(1, canvas.width >> 3); bloomA.height = Math.max(1, canvas.height >> 3);
+    bloomB.width = Math.max(1, canvas.width >> 4); bloomB.height = Math.max(1, canvas.height >> 4);
+  }
   const label = canvas.height >= 2160 || canvas.width >= 2160 ? '4K' : Math.min(canvas.width, canvas.height) >= 1440 ? '2K'
     : Math.min(canvas.width, canvas.height) >= 1080 ? 'FHD' : Math.min(canvas.width, canvas.height) >= 720 ? 'HD' : 'SD';
   $('#res').textContent = `${label} ${canvas.width}×${canvas.height}`;
 }
 
 // ---------------------------------------------------------------- Render loop
-let lastT = performance.now(), lastVT = -1, fpsAcc = 0, fpsN = 0;
+let lastT = performance.now(), lastVT = -1, fpsAcc = 0, fpsN = 0, slowFor = 0;
 let detecting = false;
 
 function frame(now) {
@@ -129,7 +161,17 @@ function frame(now) {
   lastT = now;
   const t = now / 1000;
   fpsAcc += dt; fpsN++;
-  if (fpsAcc > 0.5) { $('#fps').textContent = `${Math.round(fpsN / fpsAcc)} fps`; fpsAcc = 0; fpsN = 0; }
+  if (fpsAcc > 0.5) {
+    const fps = fpsN / fpsAcc;
+    $('#fps').textContent = `${Math.round(fps)} fps`;
+    // Weak phone? Drop the bloom pass automatically after ~4s of low frame-rate.
+    slowFor = fps < 22 && state.bloom && state.tracker ? slowFor + fpsAcc : 0;
+    if (slowFor > 4) {
+      state.bloom = false; $('#bloom').checked = false; slowFor = 0;
+      $('#hint').textContent = '⚡ Phone thoda slow hai — smooth chalane ke liye Cinematic glow off kiya (Settings me on kar sakte ho)';
+    }
+    fpsAcc = 0; fpsN = 0;
+  }
 
   const mirror = state.facing === 'user';
   if (state.tracker && video.currentTime !== lastVT && !detecting) {
@@ -153,6 +195,13 @@ function frame(now) {
   if (shakeAmt > 0.5) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }
   if (mirror) ctx.setTransform(-1, 0, 0, 1, W + sx, sy); else ctx.setTransform(1, 0, 0, 1, sx, sy);
   ctx.drawImage(video, 0, 0, W, H);
+  const L = lightCtx2;
+  L.setTransform(1, 0, 0, 1, 0, 0);
+  L.globalCompositeOperation = 'source-over';
+  L.globalAlpha = 1;
+  L.clearRect(0, 0, W, H);
+  L.setTransform(ctx.getTransform());
+  setLightLayer(L);
 
   const api = { ctx, W, H, t, dt, face: scene.face, hands: scene.hands, fx, P: particles, show: state.show, k: state.k };
   for (const inst of state.active.values()) {
@@ -163,7 +212,9 @@ function frame(now) {
     ctx.globalAlpha = 1;
   }
   particles.update(dt);
-  particles.draw(ctx);
+  particles.draw(ctx, L);
+  setLightLayer(null);
+  composeLight(W, H);
   if (state.mesh) drawMesh(W);
 
   if (flashA > 0.005) {
@@ -176,6 +227,33 @@ function frame(now) {
     ctx.globalCompositeOperation = 'source-over';
     flashA *= Math.exp(-dt * 6);
   }
+}
+
+// Bloom: downsample the light layer twice (cheap blur via bilinear scaling), add it back wide,
+// then add the sharp light on top. Gives a filmic glow around beams, fire and magic.
+function composeLight(W, H) {
+  const T = ctx.getTransform();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'lighter';
+  if (state.bloom) {
+    bloomActx.globalCompositeOperation = 'copy';
+    bloomActx.filter = 'blur(1.5px)';
+    bloomActx.drawImage(light, 0, 0, bloomA.width, bloomA.height);
+    bloomActx.filter = 'none';
+    bloomBctx.globalCompositeOperation = 'copy';
+    bloomBctx.filter = 'blur(2px)';
+    bloomBctx.drawImage(bloomA, 0, 0, bloomB.width, bloomB.height);
+    bloomBctx.filter = 'none';
+    ctx.imageSmoothingQuality = 'high';
+    ctx.globalAlpha = 0.7;
+    ctx.drawImage(bloomB, 0, 0, W, H);
+    ctx.globalAlpha = 0.55;
+    ctx.drawImage(bloomA, 0, 0, W, H);
+  }
+  ctx.globalAlpha = 1;
+  ctx.drawImage(light, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.setTransform(T); // back to mirrored video space (mesh overlay uses it)
 }
 
 function drawMesh(W) {
@@ -320,6 +398,9 @@ function wire() {
   };
   $('#quality').onchange = () => startCamera().catch(showError);
   $('#fpsSel').onchange = () => startCamera().catch(showError);
+  $('#aspect').onchange = () => startCamera().catch(showError);
+  $('#fit').onchange = applyFit;
+  $('#bloom').onchange = (e) => { state.bloom = e.target.checked; };
   $('#flipBtn').onclick = () => {
     state.facing = state.facing === 'user' ? 'environment' : 'user';
     startCamera().catch(showError);
@@ -397,4 +478,5 @@ async function boot() {
 
 buildCarousel();
 wire();
+applyFit();
 pick(CHARACTERS[0].id);

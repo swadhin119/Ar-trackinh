@@ -7,7 +7,7 @@
 //   P    : shared particle system, fx: { shake(px), flash(color,a), video, sampleFrame() }
 //   k    : intensity multiplier from the UI slider
 
-import { glow, glowLine, glowCircle, bolt, hexA } from './fx.js';
+import { glow, glowLine, glowCircle, glowSegs, bolt, forkedBolt, drawLightning, hexA } from './fx.js';
 import { HAND_CONN, BROW_A, BROW_B } from './scene.js';
 
 const TAU = Math.PI * 2;
@@ -78,6 +78,58 @@ function ringsUpdate(a, rings, speed = 1) {
   }
 }
 
+/** Face-tracked armoured helmet built from landmarks (perspective follows the real face). */
+function ironHelmet(a, f, C) {
+  const { ctx } = a, P = f.P, Wf = f.faceW, up = f.up;
+  const inward = (i, k) => lerp(P[i], f.center, k);
+  ctx.save();
+  // Red outer shell
+  const shell = scaled(f.oval, f.center, 1.1, 1.07);
+  smoothPath(ctx, shell);
+  const hl = add(f.forehead, up, -Wf * 0.05);
+  const g = ctx.createRadialGradient(hl.x, hl.y, Wf * 0.05, f.center.x, f.center.y, Wf * 0.85);
+  g.addColorStop(0, '#ff5a4a'); g.addColorStop(0.45, '#c3141f'); g.addColorStop(0.85, '#5c060b'); g.addColorStop(1, '#2a0205');
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.lineWidth = Wf * 0.012; ctx.strokeStyle = '#1a0103'; ctx.stroke();
+  // Gold faceplate
+  const plate = [
+    lerp(P[10], P[168], 0.42),
+    add(P[334], up, Wf * 0.07), inward(356, 0.12), inward(454, 0.14), inward(397, 0.12), inward(377, 0.08),
+    lerp(P[152], P[17], 0.12),
+    inward(148, 0.08), inward(172, 0.12), inward(234, 0.14), inward(127, 0.12), add(P[105], up, Wf * 0.07),
+  ];
+  smoothPath(ctx, plate);
+  const pg = ctx.createLinearGradient(plate[0].x, plate[0].y, plate[6].x, plate[6].y);
+  pg.addColorStop(0, '#ffe7a0'); pg.addColorStop(0.35, '#e8b445'); pg.addColorStop(0.75, '#b07a17'); pg.addColorStop(1, '#6b4708');
+  ctx.fillStyle = pg;
+  ctx.fill();
+  ctx.lineWidth = Wf * 0.014; ctx.strokeStyle = '#3a2205'; ctx.stroke();
+  // Panel lines
+  ctx.lineWidth = Wf * 0.008; ctx.strokeStyle = 'rgba(40,20,0,0.75)'; ctx.lineCap = 'round';
+  const lines = [
+    [lerp(P[10], P[168], 0.42), P[168], lerp(P[168], P[1], 0.85)],
+    [P[129], lerp(P[129], P[234], 0.55)], [P[358], lerp(P[358], P[454], 0.55)],
+    [lerp(P[61], P[172], 0.3), P[61], P[291], lerp(P[291], P[397], 0.3)],
+    [add(f.forehead, up, Wf * 0.28), lerp(P[10], P[168], 0.42)],
+  ];
+  for (const ln of lines) { path(ctx, ln, false); ctx.stroke(); }
+  // Eye slits: dark socket + glowing slit
+  for (const [e, inner, outer] of [[f.eyeA, 133, 33], [f.eyeB, 362, 263]]) {
+    const I = P[inner], O = P[outer], u = unit(O.x - I.x, O.y - I.y), w = e.w;
+    const slit = [
+      add(add(I, u, -w * 0.08), up, w * 0.04), add(add(O, u, w * 0.25), up, w * 0.3),
+      add(add(O, u, w * 0.3), up, w * 0.1), add(add(I, u, -w * 0.02), up, -w * 0.12),
+    ];
+    path(ctx, scaled(slit, e.c, 1.2)); ctx.fillStyle = '#120603'; ctx.fill();
+    const on = 1 - clamp((e.blink - 0.4) / 0.3, 0, 0.85);
+    path(ctx, slit); ctx.fillStyle = `rgba(215,250,255,${0.35 + 0.65 * on})`; ctx.fill();
+    glow(ctx, e.c.x, e.c.y, w * 1.6, C, 0.8 * on);
+  }
+  ctx.restore();
+  glow(ctx, hl.x, hl.y, Wf * 0.35, '#ffffff', 0.12, true);
+}
+
 // =========================================================================
 // 1. Iron Armor – repulsors, arc HUD, glowing eyes
 // =========================================================================
@@ -113,7 +165,8 @@ function iron() {
 
       const f = a.face;
       if (!f) return;
-      if (a.show.face) {
+      if (a.show.face) ironHelmet(a, f, C);
+      if (a.show.face && !a.show.eyes) {
         const R = f.faceW * 0.95;
         for (let i = 0; i < 4; i++) {
           const s = -t * 0.8 + i * (TAU / 4);
@@ -127,7 +180,7 @@ function iron() {
         }
       }
       if (a.show.eyes) {
-        eyeGlow(a, C, 1.1);
+        if (!a.show.face) eyeGlow(a, C, 1.1);
         // Gaze-driven targeting reticle
         const tgt = add(f.center, f.dir, f.faceW * 2.2);
         const rr = f.faceW * 0.18;
@@ -154,14 +207,16 @@ function spider() {
       if (f && a.show.face) {
         ctx.save();
         smoothPath(ctx, f.oval);
-        const gr = ctx.createRadialGradient(f.center.x, f.center.y, f.faceW * 0.1, f.center.x, f.center.y, f.faceW * 0.8);
-        gr.addColorStop(0, 'rgba(225,24,32,0.93)');
-        gr.addColorStop(1, 'rgba(120,6,14,0.96)');
+        const hl = lerp(f.center, f.nose, 0.6);
+        const gr = ctx.createRadialGradient(hl.x, hl.y, f.faceW * 0.05, f.center.x, f.center.y, f.faceW * 0.75);
+        gr.addColorStop(0, 'rgba(240,40,44,0.97)');
+        gr.addColorStop(0.55, 'rgba(190,16,26,0.97)');
+        gr.addColorStop(1, 'rgba(70,2,8,0.98)');
         ctx.fillStyle = gr;
         ctx.fill();
         ctx.clip();
-        ctx.strokeStyle = 'rgba(15,0,0,0.8)';
-        ctx.lineWidth = Math.max(1.5, f.faceW * 0.007);
+        ctx.strokeStyle = 'rgba(10,0,0,0.85)';
+        ctx.lineWidth = Math.max(1.5, f.faceW * 0.006);
         const c = f.P[6];
         ctx.beginPath();
         for (const p of f.oval) { ctx.moveTo(c.x, c.y); ctx.lineTo(p.x, p.y); }
@@ -180,18 +235,27 @@ function spider() {
         ctx.restore();
       }
       if (f && (a.show.eyes || a.show.face)) {
-        for (const e of eyes(f)) {
-          const s = 2.1;
-          const lens = scaled(e.pts, e.c, s, s * (1.15 - 0.75 * e.blink));
-          const off = lerp(e.c, f.center, -0.12);
-          const sh = lens.map((p) => ({ x: p.x + (off.x - e.c.x), y: p.y + (off.y - e.c.y) - e.w * 0.15 }));
-          smoothPath(ctx, sh);
-          ctx.fillStyle = 'rgba(245,250,255,0.97)';
-          ctx.fill();
-          ctx.lineWidth = f.faceW * 0.03;
-          ctx.strokeStyle = '#0b0b0f';
+        // Classic large angled lenses, anchored to real eye corners
+        for (const [e, inner, outer] of [[f.eyeA, 133, 33], [f.eyeB, 362, 263]]) {
+          const I = f.P[inner], O = f.P[outer], u = unit(O.x - I.x, O.y - I.y), up = f.up, w = e.w;
+          const sq = 1 - 0.65 * e.blink;
+          const pts = [
+            add(add(I, u, -w * 0.12), up, w * 0.05),
+            add(add(e.c, up, w * 0.75 * sq), u, -w * 0.05),
+            add(add(O, u, w * 0.55), up, w * 0.7 * sq),
+            add(add(O, u, w * 0.5), up, -w * 0.1 * sq),
+            add(add(e.c, up, -w * 0.4 * sq), u, w * 0.1),
+          ];
+          smoothPath(ctx, pts);
+          ctx.lineWidth = f.faceW * 0.035;
+          ctx.strokeStyle = '#0a0a0e';
           ctx.stroke();
+          const lg = ctx.createLinearGradient(pts[1].x, pts[1].y, pts[4].x, pts[4].y);
+          lg.addColorStop(0, '#ffffff'); lg.addColorStop(1, '#c9d3df');
+          ctx.fillStyle = lg;
+          ctx.fill();
         }
+        glow(ctx, f.forehead.x, f.forehead.y + f.faceW * 0.15, f.faceW * 0.3, '#ffffff', 0.08, true);
       }
       if (a.show.hands) for (const h of a.hands) {
         if (h.thwip && (h.events.thwipStart || t - (last[h.id] || 0) > 0.45)) {
@@ -252,6 +316,27 @@ function spider() {
 // =========================================================================
 // 3. Mystic Arts – rotating mandala shields, draw-a-circle sling portals
 // =========================================================================
+// Procedural "arcane" glyphs (3-4 strokes each) – generated once.
+const GLYPHS = Array.from({ length: 24 }, (_, gi) => {
+  let x = gi * 7919 + 13;
+  const r = () => { x = (x * 16807) % 2147483647; return (x % 1000) / 1000; };
+  return Array.from({ length: 3 + (gi % 2) }, () => [[r() - 0.5, r() - 0.5], [r() - 0.5, r() - 0.5]]);
+});
+function runeRing(a, x, y, R, rot, size, color, alpha) {
+  const segs = [];
+  const n = GLYPHS.length;
+  for (let i = 0; i < n; i++) {
+    const ang = rot + (i / n) * TAU;
+    const cx = x + Math.cos(ang) * R, cy = y + Math.sin(ang) * R;
+    const ca = Math.cos(ang + Math.PI / 2), sa = Math.sin(ang + Math.PI / 2);
+    for (const [[x1, y1], [x2, y2]] of GLYPHS[i]) {
+      segs.push([{ x: cx + (x1 * ca - y1 * sa) * size, y: cy + (x1 * sa + y1 * ca) * size },
+        { x: cx + (x2 * ca - y2 * sa) * size, y: cy + (x2 * sa + y2 * ca) * size }]);
+    }
+  }
+  glowSegs(a.ctx, segs, color, size * 0.08, alpha);
+}
+
 function mystic() {
   const C = '#ff9a1f';
   const trails = {}, portals = [];
@@ -266,11 +351,9 @@ function mystic() {
     }
     const tri = [0, 1, 2].map((i) => ({ x: x + Math.cos(-rot * 1.7 + i * TAU / 3) * R * 0.5, y: y + Math.sin(-rot * 1.7 + i * TAU / 3) * R * 0.5 }));
     glowLine(ctx, tri, C, w * 0.6, alpha, true);
-    for (let i = 0; i < 24; i++) {
-      const s = -rot * 0.6 + (i / 24) * TAU;
-      const p = { x: x + Math.cos(s) * R * 0.93, y: y + Math.sin(s) * R * 0.93 };
-      glow(ctx, p.x, p.y, R * 0.035, C, alpha);
-    }
+    runeRing(a, x, y, R * 0.93, -rot * 0.6, R * 0.09, C, alpha);
+    runeRing(a, x, y, R * 0.68, rot * 0.9, R * 0.07, C, alpha * 0.8);
+    glowCircle(ctx, x, y, R * 1.12, C, w * 0.4, alpha * 0.5);
     glow(ctx, x, y, R * 0.9, C, 0.25 * alpha, true);
   }
   return {
@@ -368,24 +451,29 @@ function thunder() {
           glow(ctx, h.palm.x, h.palm.y, h.size * 1.2, C, 0.45);
           for (const tip of [8, 12, 16, 20]) {
             if (!chance(0.55 * k)) continue;
-            glowLine(ctx, bolt(h.P[4], h.P[tip], h.size * 0.35, 4), C, h.size * 0.022);
+            drawLightning(ctx, forkedBolt(h.P[4], h.P[tip], h.size * 0.35, 1, 4), C, h.size * 0.022);
           }
           if (chance(0.25 * k)) {
             const tip = h.P[pick([8, 12, 16, 20])];
             glowLine(ctx, bolt(tip, add(tip, { x: rnd(-1, 1), y: rnd(-1, 0.2) }, h.size * 1.2), h.size * 0.4, 4), C, h.size * 0.016);
           }
         }
+        // crackling electric aura over the whole hand
+        for (let i = 0; i < 5 * k; i++) {
+          const [p, q] = pick(HAND_CONN);
+          glowLine(ctx, bolt(h.P[p], h.P[q], h.size * 0.15, 3), C, h.size * 0.012, 0.7);
+        }
         if (h.fist) {
           glow(ctx, h.palm.x, h.palm.y, h.size * 1.6, C, 0.6 + 0.3 * Math.sin(t * 30));
           if (chance(0.22 * k)) {
             const top = { x: h.palm.x + rnd(-W * 0.2, W * 0.2), y: -20 };
-            glowLine(ctx, bolt(top, h.palm, h.size * 1.4, 6), C, h.size * 0.05);
+            drawLightning(ctx, forkedBolt(top, h.palm, h.size * 1.4, 3, 6), C, h.size * 0.05);
             a.fx.flash('#cfe9ff', 0.08);
           }
         }
         if (h.events.fistStart && t - strikeT > 0.4) {
           strikeT = t;
-          for (let i = 0; i < 3; i++) glowLine(ctx, bolt({ x: h.palm.x + rnd(-80, 80), y: -20 }, h.palm, h.size * 2, 7), C, h.size * 0.09);
+          for (let i = 0; i < 3; i++) drawLightning(ctx, forkedBolt({ x: h.palm.x + rnd(-80, 80), y: -20 }, h.palm, h.size * 2, 4, 7), C, h.size * 0.09);
           burst(a, h.palm.x, h.palm.y, 60, C, h.size * 14);
           a.fx.flash('#e6f4ff', 0.55); a.fx.shake(h.size * 0.35);
         }
@@ -393,13 +481,13 @@ function thunder() {
       if (hands.length === 2 && (hands[0].open || hands[0].fist) && (hands[1].open || hands[1].fist)) {
         const d = dist(hands[0].palm, hands[1].palm);
         if (d < W * 0.75) {
-          for (let i = 0; i < 2; i++) glowLine(ctx, bolt(hands[0].palm, hands[1].palm, d * 0.25, 6), C, hands[0].size * 0.05);
+          for (let i = 0; i < 2; i++) drawLightning(ctx, forkedBolt(hands[0].palm, hands[1].palm, d * 0.25, 2, 6), C, hands[0].size * 0.05);
         }
       }
       const f = a.face;
       if (!f) return;
       if (a.show.eyes) {
-        eyeGlow(a, '#bfe6ff', 1.3);
+        eyeGlow(a, '#bfe6ff', 1.0, 0.65);
         for (const e of eyes(f)) {
           if (e.blink > 0.5 || !chance(0.5 * k)) continue;
           const ang = rnd(0, TAU);
@@ -431,16 +519,18 @@ function gauntlet() {
         ctx.save();
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        ctx.strokeStyle = '#6b4a0c';
-        ctx.lineWidth = h.size * 0.24;
         ctx.beginPath();
         for (const [i, j] of HAND_CONN) { ctx.moveTo(h.P[i].x, h.P[i].y); ctx.lineTo(h.P[j].x, h.P[j].y); }
-        ctx.stroke();
         const gg = ctx.createLinearGradient(h.P[0].x, h.P[0].y, h.P[12].x, h.P[12].y);
-        gg.addColorStop(0, '#b8860b'); gg.addColorStop(0.5, '#ffe27a'); gg.addColorStop(1, '#d4a017');
-        ctx.strokeStyle = gg;
-        ctx.lineWidth = h.size * 0.17;
-        ctx.stroke();
+        gg.addColorStop(0, '#a87410'); gg.addColorStop(0.5, '#f2c94c'); gg.addColorStop(1, '#c08a14');
+        // layered strokes = cylindrical metal: dark rim, gold body, bright specular ridge
+        for (const [col, wd] of [['#3d2604', 0.26], ['#7a5208', 0.22], [gg, 0.17], ['#ffe9a3', 0.07]]) {
+          ctx.strokeStyle = col; ctx.lineWidth = h.size * wd; ctx.stroke();
+        }
+        ctx.save();
+        ctx.translate(-h.size * 0.025, -h.size * 0.025);
+        ctx.strokeStyle = 'rgba(255,255,240,0.85)'; ctx.lineWidth = h.size * 0.025; ctx.stroke();
+        ctx.restore();
         const plate = [h.P[0], h.P[1], h.P[5], h.P[9], h.P[13], h.P[17]];
         path(ctx, plate);
         ctx.fillStyle = gg;
@@ -454,7 +544,11 @@ function gauntlet() {
           const r = h.size * (idx === null ? 0.16 : 0.1);
           ctx.fillStyle = '#2a1a00';
           ctx.beginPath(); ctx.arc(p.x, p.y, r * 1.25, 0, TAU); ctx.fill();
-          ctx.fillStyle = col;
+          const sg = ctx.createRadialGradient(p.x - r * 0.35, p.y - r * 0.35, r * 0.05, p.x, p.y, r);
+          sg.addColorStop(0, '#ffffff'); sg.addColorStop(0.25, col); sg.addColorStop(1, hexA(col, 0.6));
+          ctx.fillStyle = '#000';
+          ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, TAU); ctx.fill();
+          ctx.fillStyle = sg;
           ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, TAU); ctx.fill();
           glow(ctx, p.x, p.y, r * (2.6 + 0.4 * Math.sin(t * 4 + r)), col, 0.85);
         }
@@ -703,7 +797,7 @@ function chaos() {
       for (const h of hands) {
         for (let i = 1; i < 5; i++) {
           const p = h.tips[i];
-          if (chance(0.8 * k)) a.P.emit({ x: p.x, y: p.y, vx: rnd(-1, 1) * h.size * 0.6, vy: -rnd(0.3, 1) * h.size * 1.2, swirl: h.size * 6, life: rnd(0.6, 1.2), size: h.size * rnd(0.15, 0.3), grow: h.size * 0.3, color: pick([C, '#d4002a', '#ff4d6d']), soft: true, drag: 0.8 });
+          if (chance(0.8 * k)) a.P.emit({ x: p.x, y: p.y, vx: rnd(-1, 1) * h.size * 0.6, vy: -rnd(0.3, 1) * h.size * 1.2, swirl: h.size * 6, life: rnd(0.6, 1.2), size: h.size * rnd(0.15, 0.3), grow: h.size * 0.3, color: pick([C, '#d4002a', '#ff4d6d']), tex: 'puff', drag: 0.8 });
         }
         for (let i = 0; i < 4; i++) {
           const p = h.tips[i], q = h.tips[i + 1];
@@ -768,10 +862,10 @@ function chaos() {
 // 10. Hellfire Rider – flaming skull, fire hands, swinging chain on fist
 // =========================================================================
 function hellfire() {
-  const FIRE = ['#fff6c0', '#ffd23f', '#ff9a1a', '#ff5a00', '#c21800', '#4a0a00'];
+  const FIRE = ['#ffd860', '#ffb020', '#ff7a10', '#e84a00', '#a01800', '#3a0800'];
   const chains = {};
   function flame(a, x, y, s, up = 1) {
-    a.P.emit({ x, y, vx: rnd(-0.3, 0.3) * s, vy: -rnd(1.2, 3) * s * up, swirl: s * 3, drag: 0.6, life: rnd(0.45, 0.9), size: s * rnd(0.35, 0.7), grow: -s * 0.3, colors: FIRE });
+    a.P.emit({ x, y, vx: rnd(-0.3, 0.3) * s, vy: -rnd(1.4, 3.2) * s * up, swirl: s * 4, drag: 0.5, life: rnd(0.4, 0.85), size: s * rnd(0.45, 0.85), grow: -s * 0.35, colors: FIRE, tex: 'puff' });
   }
   return {
     draw(a) {
@@ -989,10 +1083,10 @@ function photon() {
       const { ctx, t, k, W, H } = a;
       const f = a.face;
       if (f && a.show.face) {
-        for (let i = 0; i < 10 * k; i++) {
+        for (let i = 0; i < 6 * k; i++) {
           const p = pick(f.oval);
           const d = unit(p.x - f.center.x, p.y - f.center.y);
-          a.P.emit({ x: p.x, y: p.y, vx: d.x * f.faceW * rnd(0.3, 1), vy: d.y * f.faceW * rnd(0.3, 1) - f.faceW * 0.5, life: rnd(0.4, 0.9), size: f.faceW * rnd(0.04, 0.1), color: pick([C, C2, '#ff7a1a']), drag: 1 });
+          a.P.emit({ x: p.x, y: p.y, vx: d.x * f.faceW * rnd(0.3, 1), vy: d.y * f.faceW * rnd(0.3, 1) - f.faceW * 0.5, life: rnd(0.4, 0.9), size: f.faceW * rnd(0.05, 0.12), color: pick([C, C2, '#ff7a1a']), drag: 1, tex: chance(0.5) ? 'puff' : 'glow' });
         }
         glowLine(ctx, scaled(f.oval, f.center, 1.06), C, f.faceW * 0.012, 0.5 + 0.2 * Math.sin(t * 6), true);
         if (f.jaw > 0.55 && t - lastJaw > 0.6) {
@@ -1005,7 +1099,7 @@ function photon() {
         for (const e of eyes(f)) {
           const o = 1 - clamp((e.blink - 0.35) / 0.3, 0, 1);
           if (o <= 0) continue;
-          glow(ctx, e.iris.x, e.iris.y, e.w * 2, C, o);
+          glow(ctx, e.iris.x, e.iris.y, e.w * 1.6, C, 0.8 * o);
           glow(ctx, e.iris.x, e.iris.y, e.w * 0.6, '#ffffff', o);
           for (let r = 0; r < 6; r++) {
             const ang = t * 0.8 + r * (TAU / 6);

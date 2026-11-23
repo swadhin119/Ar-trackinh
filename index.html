@@ -32,12 +32,25 @@
     <section id="settings" class="panel hidden">
       <label>Quality
         <select id="quality">
-          <option value="720">HD 720p</option>
+          <option value="720">HD 720p (fast)</option>
           <option value="1080" selected>Full HD 1080p</option>
           <option value="1440">2K 1440p</option>
           <option value="2160">4K 2160p</option>
         </select>
       </label>
+      <label>Camera view
+        <select id="aspect">
+          <option value="43" selected>Wide 4:3 (poora camera, no zoom)</option>
+          <option value="169">16:9 (thoda crop)</option>
+        </select>
+      </label>
+      <label>Screen pe dikhana
+        <select id="fit">
+          <option value="contain" selected>Fit (poora frame dikhe)</option>
+          <option value="cover">Fill (screen bhar de, side kat jaye)</option>
+        </select>
+      </label>
+      <label id="zoomRow" class="hidden">Camera zoom <input id="zoom" type="range" min="1" max="1" step="0.1" value="1" /></label>
       <label>FPS
         <select id="fpsSel">
           <option value="30">30 fps</option>
@@ -45,6 +58,7 @@
         </select>
       </label>
       <label>Effect intensity <input id="intensity" type="range" min="0.3" max="2" step="0.1" value="1" /></label>
+      <label class="row"><input id="bloom" type="checkbox" checked /> Cinematic glow (bloom)</label>
       <label class="row"><input id="combo" type="checkbox" /> Combo mode (ek saath kai characters)</label>
       <label class="row"><input id="mic" type="checkbox" checked /> Recording me mic audio</label>
       <p class="small">Quality camera ki maximum capability tak hi jayegi. Recording canvas ke full resolution pe hoti hai.</p>
