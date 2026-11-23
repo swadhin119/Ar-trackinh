@@ -9,6 +9,19 @@
 
 import { glow, glowLine, glowCircle, glowSegs, bolt, forkedBolt, drawLightning, hexA } from './fx.js';
 import { HAND_CONN, BROW_A, BROW_B } from './scene.js';
+import { paintSpider, paintIron, paintSkinTint, hulkDetails, thanosDetails, paintPanther, paintSkull } from './masks.js';
+
+// 3D face-mesh materials (rendered by facemesh.js with real-camera lighting).
+// If WebGL is unavailable, a.mesh() returns false and the older 2D drawings are used instead.
+const MAT = {
+  spider: { key: 'spider', paint: paintSpider, cover: 'bem', shade: 0.9, gloss: 0.18 },
+  iron: { key: 'iron', paint: paintIron, cover: 'bem', shade: 0.75, metal: 0.55, gloss: 0.55 },
+  hulk: { key: 'hulk', paint: () => paintSkinTint(hulkDetails), cover: 'b', tint: [0.34, 0.6, 0.22], tintAmt: 0.9, gloss: 0.1 },
+  thanos: { key: 'thanos', paint: () => paintSkinTint(thanosDetails), cover: 'b', tint: [0.44, 0.27, 0.58], tintAmt: 0.9, gloss: 0.12 },
+  panther: { key: 'panther', paint: paintPanther, cover: 'bem', shade: 0.85, metal: 0.25, gloss: 0.6 },
+  skull: { key: 'skull', paint: paintSkull, cover: 'bem', shade: 0.9, gloss: 0.25 },
+};
+const mesh = (a, m) => (a.mesh ? a.mesh(m) : false);
 
 const TAU = Math.PI * 2;
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -91,7 +104,19 @@ function ironHelmet(a, f, C) {
   g.addColorStop(0, '#ff5a4a'); g.addColorStop(0.45, '#c3141f'); g.addColorStop(0.85, '#5c060b'); g.addColorStop(1, '#2a0205');
   ctx.fillStyle = g;
   ctx.fill();
-  ctx.lineWidth = Wf * 0.012; ctx.strokeStyle = '#1a0103'; ctx.stroke();
+  ctx.lineWidth = Wf * 0.005; ctx.strokeStyle = 'rgba(26,1,3,0.6)'; ctx.stroke();
+  ctx.restore();
+  if (mesh(a, MAT.iron)) {
+    // 3D faceplate rendered – just add the emissive eye glow
+    for (const e of eyes(f)) {
+      const on = 1 - clamp((e.blink - 0.4) / 0.3, 0, 0.85);
+      glow(ctx, e.c.x, e.c.y, e.w * 1.5, C, 0.75 * on);
+      glow(ctx, e.c.x, e.c.y, e.w * 0.5, '#ffffff', 0.5 * on);
+    }
+    glow(ctx, hl.x, hl.y, Wf * 0.35, '#ffffff', 0.08, true);
+    return;
+  }
+  ctx.save();
   // Gold faceplate
   const plate = [
     lerp(P[10], P[168], 0.42),
@@ -204,7 +229,8 @@ function spider() {
     draw(a) {
       const { ctx, t, W, H } = a;
       const f = a.face;
-      if (f && a.show.face) {
+      const meshed = !!(f && a.show.face && mesh(a, MAT.spider));
+      if (f && a.show.face && !meshed) {
         ctx.save();
         smoothPath(ctx, f.oval);
         const hl = lerp(f.center, f.nose, 0.6);
@@ -234,7 +260,7 @@ function spider() {
         }
         ctx.restore();
       }
-      if (f && (a.show.eyes || a.show.face)) {
+      if (f && !meshed && (a.show.eyes || a.show.face)) {
         // Classic large angled lenses, anchored to real eye corners
         for (const [e, inner, outer] of [[f.eyeA, 133, 33], [f.eyeB, 362, 263]]) {
           const I = f.P[inner], O = f.P[outer], u = unit(O.x - I.x, O.y - I.y), up = f.up, w = e.w;
@@ -574,7 +600,7 @@ function gauntlet() {
       }
       const f = a.face;
       if (f && a.show.eyes) eyeGlow(a, '#c070ff', 0.8, 0.8);
-      if (f && a.show.face) {
+      if (f && a.show.face && !mesh(a, MAT.thanos)) {
         ctx.save();
         smoothPath(ctx, f.oval);
         ctx.clip();
@@ -655,6 +681,7 @@ function gamma() {
       const { ctx, t, dt, k, W, H } = a;
       const f = a.face;
       if (f && a.show.face) {
+        if (!mesh(a, MAT.hulk)) {
         ctx.save();
         smoothPath(ctx, scaled(f.oval, f.center, 1.04));
         ctx.clip();
@@ -675,6 +702,7 @@ function gamma() {
           ctx.stroke();
         }
         ctx.restore();
+        }
         rage += ((f.jaw > 0.5 ? 1 : 0) - rage) * Math.min(1, dt * 5);
         if (f.jaw > 0.5) {
           if (t - lastRing > 0.22) {
@@ -725,7 +753,9 @@ function panther() {
     draw(a) {
       const { ctx, t, dt, k, W, H } = a;
       const f = a.face;
-      if (f && a.show.face) {
+      const meshed = !!(f && a.show.face && mesh(a, MAT.panther));
+      if (meshed) glowLine(ctx, f.oval, C, f.faceW * 0.01, 0.35 + 0.25 * Math.sin(t * 2), true);
+      if (f && a.show.face && !meshed) {
         ctx.save();
         smoothPath(ctx, f.oval);
         ctx.fillStyle = 'rgba(18,18,26,0.86)';
@@ -738,10 +768,12 @@ function panther() {
       }
       if (f && a.show.eyes) {
         for (const e of eyes(f)) {
-          const lens = scaled(e.pts, e.c, 1.7, 1.7 * (1 - 0.8 * e.blink));
-          smoothPath(ctx, lens);
-          ctx.fillStyle = 'rgba(235,240,255,0.95)';
-          ctx.fill();
+          if (!meshed) {
+            const lens = scaled(e.pts, e.c, 1.7, 1.7 * (1 - 0.8 * e.blink));
+            smoothPath(ctx, lens);
+            ctx.fillStyle = 'rgba(235,240,255,0.95)';
+            ctx.fill();
+          }
           glow(ctx, e.c.x, e.c.y, e.w * 1.2, C, 0.6);
         }
       }
@@ -873,6 +905,10 @@ function hellfire() {
       const f = a.face;
       if (f && a.show.face) {
         const P = f.P, Wf = f.faceW;
+        if (mesh(a, MAT.skull)) {
+          // charred rim so the skull edge reads as burning, not a cut-out
+          glowLine(ctx, scaled(f.oval, f.center, 1.01), '#ff5a00', Wf * 0.02, 0.6, true);
+        } else {
         ctx.save();
         smoothPath(ctx, scaled(f.oval, f.center, 1.02));
         ctx.fillStyle = 'rgba(8,4,2,0.9)';
@@ -919,6 +955,7 @@ function hellfire() {
           }
         }
         ctx.restore();
+        }
         // flames from top of head
         const topPts = f.oval.filter((p) => p.y < P[168].y + (P[1].y - P[168].y) * 0.3);
         for (let i = 0; i < 16 * k; i++) {

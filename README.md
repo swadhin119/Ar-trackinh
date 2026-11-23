@@ -63,7 +63,8 @@ cd android
 - **MediaPipe Tasks Vision** (`HandLandmarker` 2 haath, `FaceLandmarker` 478 points + iris + 52 blendshapes), GPU delegate ke saath
 - Gaze = iris ka eye-corners ke relative offset + head direction (3D nose vector). Isse beams aur reticle aim hote hain
 - Blendshapes se muh khulna, palak jhapakna aur eyebrow upar hona detect hota hai
-- Saare effects Canvas 2D pe procedurally bante hain (additive glow sprites, lightning, particle system, verlet chain). Koi image asset nahi hai
+- **Realistic 3D masks:** face_landmarker model ke canonical face mesh (468 points, 898 triangles, UV map) pe WebGL2 se texture lagta hai. Camera ki asli roshni aur chhaya mask pe transfer hoti hai, aur metal (Iron) aas-paas ki scene reflect karta hai (`js/facemesh.js`, `js/masks.js`)
+- Baaki effects Canvas 2D pe procedurally bante hain (additive glow sprites, lightning, particle system, verlet chain). Koi image asset nahi hai
 - Recording: `canvas.captureStream()` + `MediaRecorder` (+ mic audio)
 - Saari processing device pe hoti hai, video kahin upload nahi hota
 

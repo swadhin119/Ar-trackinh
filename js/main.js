@@ -2,6 +2,7 @@ import { createTracker } from './tracker.js';
 import { Scene, HAND_CONN } from './scene.js';
 import { Particles, setLightLayer } from './fx.js';
 import { CHARACTERS } from './characters.js';
+import { FaceMeshRenderer } from './facemesh.js';
 
 const $ = (s) => document.querySelector(s);
 const canvas = $('#stage');
@@ -25,6 +26,7 @@ const state = {
   mesh: false,
   combo: false,
   bloom: true,
+  realistic: true,
   k: 1,
   active: new Map(), // id -> instance
   lastPicked: null,
@@ -34,6 +36,9 @@ const state = {
 };
 
 const scene = new Scene();
+let meshR = null;
+try { meshR = new FaceMeshRenderer(); if (!meshR.ok) meshR = null; } catch (e) { console.warn('3D face mesh disabled', e); meshR = null; }
+let frameNo = 0;
 const particles = new Particles(3500);
 let shakeAmt = 0, flashA = 0, flashColor = '#ffffff';
 const sampleCanvas = document.createElement('canvas');
@@ -203,7 +208,8 @@ function frame(now) {
   L.setTransform(ctx.getTransform());
   setLightLayer(L);
 
-  const api = { ctx, W, H, t, dt, face: scene.face, hands: scene.hands, fx, P: particles, show: state.show, k: state.k };
+  frameNo++;
+  const api = { ctx, W, H, t, dt, face: scene.face, hands: scene.hands, fx, P: particles, show: state.show, k: state.k, mesh: drawMesh3D };
   for (const inst of state.active.values()) {
     ctx.save();
     try { inst.draw(api); } catch (e) { console.error(e); }
@@ -226,6 +232,25 @@ function frame(now) {
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
     flashA *= Math.exp(-dt * 6);
+  }
+}
+
+/** Render a material on the tracked 3D face mesh and composite it onto the frame. */
+function drawMesh3D(mat) {
+  const f = scene.face;
+  if (!meshR || !f || !state.realistic) return false;
+  try {
+    const W = canvas.width, H = canvas.height;
+    meshR.prepare(video, f, W, H, frameNo);
+    const c = meshR.render(f, W, H, mat);
+    if (!c) return false;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(c, 0, 0);
+    return true;
+  } catch (e) {
+    console.error('mesh render failed, falling back to 2D', e);
+    meshR = null;
+    return false;
   }
 }
 
@@ -401,6 +426,7 @@ function wire() {
   $('#aspect').onchange = () => startCamera().catch(showError);
   $('#fit').onchange = applyFit;
   $('#bloom').onchange = (e) => { state.bloom = e.target.checked; };
+  $('#realistic').onchange = (e) => { state.realistic = e.target.checked; };
   $('#flipBtn').onclick = () => {
     state.facing = state.facing === 'user' ? 'environment' : 'user';
     startCamera().catch(showError);
